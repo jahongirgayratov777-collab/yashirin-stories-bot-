@@ -109,3 +109,11 @@ app.get("/", (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`Server ${PORT} da ishlayapti`));
+
+const webhookUrl =
+  "https://yashirin-stories-bot-production-b4a1.up.railway.app/webhook";
+
+fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${webhookUrl}`)
+  .then(res => res.json())
+  .then(data => console.log("Webhook sozlandi:", data))
+  .catch(err => console.error("Webhook xatosi:", err));
