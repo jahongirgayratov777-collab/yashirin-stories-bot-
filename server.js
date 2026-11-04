@@ -20,93 +20,65 @@ const tgClient = new TelegramClient(
 );
 
 async function sendMessage(chatId, text, keyboard = null) {
-  const body = {
-    chat_id: chatId,
-    text,
-    parse_mode: "HTML"
-  };
+  const body = { chat_id: chatId, text, parse_mode: "HTML" };
+  if (keyboard) body.reply_markup = { inline_keyboard: keyboard };
 
-  if (keyboard) {
-    body.reply_markup = { inline_keyboard: keyboard };
-  }
-
-  return fetch(
-    `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body)
-    }
-  );
+  return fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
 }
 
-async function sendMedia(chatId, buffer, caption, isVideo = false) {
+async function sendMedia(chatId, buffer, caption, video = false) {
   const form = new FormData();
   form.append("chat_id", String(chatId));
   form.append("caption", caption);
-
   form.append(
-    isVideo ? "video" : "photo",
+    video ? "video" : "photo",
     new Blob([buffer]),
-    isVideo ? "story.mp4" : "story.jpg"
+    video ? "story.mp4" : "story.jpg"
   );
 
   return fetch(
-    `https://api.telegram.org/bot${BOT_TOKEN}/send${isVideo ? "Video" : "Photo"}`,
-    {
-      method: "POST",
-      body: form
-    }
+    `https://api.telegram.org/bot${BOT_TOKEN}/send${video ? "Video" : "Photo"}`,
+    { method: "POST", body: form }
   );
 }
 
-async function ensureConnected() {
-  if (!tgClient.connected) {
-    await tgClient.connect();
-  }
+async function connectUser() {
+  if (!tgClient.connected) await tgClient.connect();
 }
 
 async function handleMessage(message) {
   if (!message?.chat) return;
-
   const chatId = message.chat.id;
   const text = (message.text || "").trim();
 
   if (text === "/start") {
-    await sendMessage(
+    return sendMessage(
       chatId,
-      "👋 <b>Yashirin Stories Bot</b>\n\n" +
-      "Telegram username yuboring.\nMasalan: <code>@username</code>"
+      "👋 <b>Yashirin Stories Bot</b>\n\nTelegram username yuboring:\nMasalan: <code>@username</code>"
     );
-    return;
   }
 
   const username = text.replace(/^@/, "");
 
   if (/^[a-zA-Z0-9_]{5,}$/.test(username)) {
-    await sendMessage(
-      chatId,
-      `👤 <b>@${username}</b>\nPlatformani tanlang:`,
-      [[
-        { text: "✈️ Telegram", callback_data: `tg:${username}` }
-      ]]
-    );
-    return;
+    return sendMessage(chatId, `👤 @${username}\n\nXizmatni tanlang:`, [
+      [{ text: "✈️ Telegram", callback_data: `tg:${username}` }]
+    ]);
   }
 
-  await sendMessage(chatId, "❌ Username noto‘g‘ri. Qaytadan yuboring.");
-}
-
-async function getTelegramUser(username) {
-  await ensureConnected();
-  return tgClient.getEntity(username);
+  return sendMessage(chatId, "❌ Username noto‘g‘ri.");
 }
 
 async function handleProfilePhotos(chatId, username) {
   try {
-    const user = await getTelegramUser(username);
+    await connectUser();
+    const user = await tgClient.getEntity(username);
 
-    const photos = await tgClient.invoke(
+    const result = await tgClient.invoke(
       new Api.photos.GetUserPhotos({
         userId: user,
         offset: 0,
@@ -115,88 +87,66 @@ async function handleProfilePhotos(chatId, username) {
       })
     );
 
-    if (!photos.photos?.length) {
-      await sendMessage(chatId, "Profil rasmlari topilmadi.");
-      return;
+    if (!result.photos?.length) {
+      return sendMessage(chatId, "Profil rasmlari topilmadi.");
     }
 
-    await sendMessage(
-      chatId,
-      `🖼 @${username} profil rasmlari: ${photos.photos.length} ta`
-    );
+    await sendMessage(chatId, `🖼 @${username}: ${result.photos.length} ta rasm`);
 
-    for (const photo of photos.photos) {
-      try {
-        const buffer = await tgClient.downloadMedia(photo, {});
-        if (buffer) {
-          await sendMedia(chatId, buffer, `🖼 @${username}`);
-        }
-      } catch (err) {
-        console.error("Photo yuklash xatosi:", err.message);
-      }
+    for (const photo of result.photos) {
+      const buffer = await tgClient.downloadMedia(photo);
+      if (buffer) await sendMedia(chatId, buffer, `🖼 @${username}`);
     }
   } catch (error) {
-    console.error("Profil rasmlari:", error);
-    await sendMessage(chatId, "❌ Profil rasmlarini olishda xatolik.");
+    console.error("PROFILE ERROR:", error);
+    await sendMessage(chatId, `❌ Profil rasmi xatosi: ${error.message}`);
   }
 }
 
-async function handleNewStories(chatId, username) {
+async function handleStories(chatId, username) {
   try {
-    const user = await getTelegramUser(username);
+    await connectUser();
+    const peer = await tgClient.getEntity(username);
 
     const result = await tgClient.invoke(
-      new Api.stories.GetPeerStories({
-        peer: user
-      })
+      new Api.stories.GetPeerStories({ peer })
     );
 
     const stories = result.stories?.stories || [];
 
     if (!stories.length) {
-      await sendMessage(
+      return sendMessage(
         chatId,
-        `📭 @${username} da hozir faol Stories topilmadi.`
+        `📭 @${username} hozir faol Stories joylamagan yoki Stories sizga ko‘rinmaydi.`
       );
-      return;
     }
 
-    await sendMessage(
-      chatId,
-      `🆕 @${username} — ${stories.length} ta Stories topildi.`
-    );
+    await sendMessage(chatId, `🆕 ${stories.length} ta Stories topildi.`);
 
     for (const story of stories) {
       try {
-        if (story.media?.photo || story.media?.document) {
-          const buffer = await tgClient.downloadMedia(story.media, {});
+        const media = story.media;
+        const buffer = await tgClient.downloadMedia(media);
 
-          if (!buffer) continue;
+        if (!buffer) continue;
 
-          const isVideo =
-            story.media.document?.mimeType?.startsWith("video/") ||
-            story.media.document?.attributes?.some(
-              attr => attr.className === "DocumentAttributeVideo"
-            );
+        const video =
+          media.document?.mimeType?.startsWith("video/") ||
+          media.document?.attributes?.some(a => a.className === "DocumentAttributeVideo");
 
-          await sendMedia(
-            chatId,
-            buffer,
-            `📖 @${username} | Story ID: ${story.id}`,
-            Boolean(isVideo)
-          );
-        }
-      } catch (err) {
-        console.error("Story media xatosi:", err.message);
+        await sendMedia(
+          chatId,
+          buffer,
+          `📖 @${username} | Story ${story.id}`,
+          Boolean(video)
+        );
+      } catch (e) {
+        console.error("STORY MEDIA ERROR:", e);
       }
     }
   } catch (error) {
-    console.error("Stories olish xatosi:", error);
-    await sendMessage(
-      chatId,
-      "❌ Stories olish amalga oshmadi.\n" +
-      "Profil ochiqligini va akkaunt ruxsatini tekshiring."
-    );
+    console.error("STORIES ERROR:", error);
+    await sendMessage(chatId, `❌ Stories xatosi: ${error.message}`);
   }
 }
 
@@ -206,36 +156,23 @@ async function handleCallback(query) {
   const chatId = query.message.chat.id;
   const parts = (query.data || "").split(":");
   const action = parts[0];
+  const username = parts[1];
 
   if (action === "tg") {
-    const username = parts[1];
-
-    await sendMessage(
-      chatId,
-      `@${username} uchun xizmatni tanlang:`,
-      [
-        [{ text: "🆕 Yangi Stories", callback_data: `new:${username}` }],
-        [{ text: "🖼 Barcha profil rasmlari", callback_data: `photos:${username}` }],
-        [{ text: "📂 Eski Stories", callback_data: `old:${username}` }]
-      ]
-    );
-    return;
+    return sendMessage(chatId, `@${username} — tanlang:`, [
+      [{ text: "🆕 Yangi Stories", callback_data: `new:${username}` }],
+      [{ text: "📂 Eski Stories", callback_data: `old:${username}` }],
+      [{ text: "🖼 Barcha profil rasmlari", callback_data: `photos:${username}` }]
+    ]);
   }
 
-  if (action === "photos") {
-    await handleProfilePhotos(chatId, parts[1]);
-    return;
-  }
-
-  if (action === "new") {
-    await handleNewStories(chatId, parts[1]);
-    return;
-  }
+  if (action === "new") return handleStories(chatId, username);
+  if (action === "photos") return handleProfilePhotos(chatId, username);
 
   if (action === "old") {
-    await sendMessage(
+    return sendMessage(
       chatId,
-      "📂 Eski Stories arxivi faqat akkaunt egasining mavjud arxivi va Telegram ruxsat bergan ma'lumotlar doirasida olinadi. Bu funksiya keyingi bosqichda ulanadi."
+      "📂 Eski Stories: Telegram boshqa foydalanuvchilarning muddati o‘tgan Stories arxivini umumiy tarzda bermaydi. Faqat akkaunt egasining o‘z arxivi yoki mavjud ochiq Stories olinishi mumkin."
     );
   }
 }
@@ -246,9 +183,7 @@ app.post("/webhook", async (req, res) => {
   try {
     const update = req.body;
 
-    if (update.message) {
-      await handleMessage(update.message);
-    }
+    if (update.message) await handleMessage(update.message);
 
     if (update.callback_query) {
       await handleCallback(update.callback_query);
@@ -265,23 +200,19 @@ app.post("/webhook", async (req, res) => {
       );
     }
   } catch (error) {
-    console.error("Webhook xatosi:", error);
+    console.error("WEBHOOK ERROR:", error);
   }
 });
 
-app.get("/", (req, res) => {
-  res.send("Yashirin Stories Bot ishlayapti! 🤖");
-});
+app.get("/", (req, res) => res.send("Yashirin Stories Bot ishlayapti!"));
 
 app.listen(PORT, "0.0.0.0", async () => {
-  console.log(`Server ${PORT} portda ishga tushdi`);
+  console.log("Server ishga tushdi:", PORT);
 
-  if (STRING_SESSION && API_ID && API_HASH) {
-    try {
-      await tgClient.connect();
-      console.log("Telegram MTProto akkaunti ulandi!");
-    } catch (error) {
-      console.error("MTProto xatosi:", error.message);
-    }
+  try {
+    await connectUser();
+    console.log("Telegram akkaunt ulandi!");
+  } catch (error) {
+    console.error("Telegram ulanish xatosi:", error.message);
   }
 });
