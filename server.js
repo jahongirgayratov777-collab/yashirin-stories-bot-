@@ -67,6 +67,8 @@ async function handleMessage(message) {
 
 // Tugmalar
 async function handleCallback(query) {
+ 
+async function handleCallback(query) {
   const chatId = query.message.chat.id;
   const data = query.data;
 
@@ -79,43 +81,13 @@ async function handleCallback(query) {
     }
   );
 
-  const [action, username] = data.split(":");
+  const parts = data.split(":");
+  const action = parts[0];
 
-  if (action === "photo") {
-    const [platform, user] = data.split(":").slice(1);
-
-    if (platform === "tg") {
-      await sendMessage(
-        chatId,
-        `🔍 @${user} Telegram profil rasmini tekshiryapmiz...`
-      );
-
-      const response = await fetch(
-        `https://api.telegram.org/bot${BOT_TOKEN}/getUserProfilePhotos?user_id=${user}&limit=1`
-      );
-
-      const result = await response.json();
-
-      if (!result.ok || result.result.total_count === 0) {
-        await sendMessage(chatId, "❌ Profil rasmi topilmadi.");
-        return;
-      }
-
-      await sendMessage(
-        chatId,
-        "ℹ️ Telegram profil rasmini olish uchun foydalanuvchining Telegram ID raqami kerak. Username orqali ID aniqlashni keyingi bosqichda ulaymiz."
-      );
-      return;
-    }
-
-    await sendMessage(
-      chatId,
-      "📸 Instagram profil rasmi uchun alohida modul kerak. Keyingi bosqichda ulaymiz."
-    );
-    return;
-  }
-
+  // Telegram yoki Instagram tanlandi
   if (action === "tg" || action === "ig") {
+    const username = parts[1];
+
     await sendMessage(
       chatId,
       `@${username} uchun bo'limni tanlang:`,
@@ -130,40 +102,38 @@ async function handleCallback(query) {
     return;
   }
 
-  const [platform, user] = data.split(":").slice(1);
+  // Profil rasmi
+  if (action === "photo") {
+    const platform = parts[1];
+    const username = parts[2];
 
-  const messages = {
-    new: "🆕 Yangi Stories olish funksiyasi hozircha ulanmagan.",
-    old: "📚 Eski Stories olish funksiyasi hozircha ulanmagan.",
-    photo: "🖼 Profil rasmi olish funksiyasi hozircha ulanmagan."
-  };
+    if (platform === "tg") {
+      await sendMessage(
+        chatId,
+        `ℹ️ Telegram: @${username}\n\nBot boshqa foydalanuvchining profil rasmini username orqali ololmaydi. Buning uchun Telegram ID kerak.`
+      );
+      return;
+    }
 
-  await sendMessage(
-    chatId,
-    `${messages[action] || "So'rov bajarildi."}\n\nPlatforma: ${platform === "tg" ? "Telegram" : "Instagram"}\nUsername: @${user}`
-  );
+    await sendMessage(
+      chatId,
+      `📸 Instagram: @${username}\n\nInstagram profil rasmini olish modulini keyingi bosqichda ulaymiz.`
+    );
+    return;
+  }
+
+  // Stories bo'limlari
+  if (action === "new" || action === "old") {
+    const platform = parts[1];
+    const username = parts[2];
+
+    await sendMessage(
+      chatId,
+      `📌 Username: @${username}\n` +
+      `📱 Platforma: ${platform === "tg" ? "Telegram" : "Instagram"}\n\n` +
+      `${action === "new" ? "🆕 Yangi" : "📚 Eski"} Stories olish moduli hali ulanmagan.`
+    );
+    return;
+  }
 }
 
-// Telegram webhook
-app.post("/webhook", (req, res) => {
-  res.sendStatus(200);
-
-  const update = req.body;
-
-  if (update.message) {
-    handleMessage(update.message).catch(console.error);
-  }
-
-  if (update.callback_query) {
-    handleCallback(update.callback_query).catch(console.error);
-  }
-});
-
-// Server tekshirish
-app.get("/", (req, res) => {
-  res.send("YASHIRIN STORIES BOT ISHLAYAPTI! ✅");
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server ${PORT}-portda ishga tushdi`);
-});
