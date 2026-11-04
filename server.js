@@ -81,6 +81,40 @@ async function handleCallback(query) {
 
   const [action, username] = data.split(":");
 
+  if (action === "photo") {
+    const [platform, user] = data.split(":").slice(1);
+
+    if (platform === "tg") {
+      await sendMessage(
+        chatId,
+        `🔍 @${user} Telegram profil rasmini tekshiryapmiz...`
+      );
+
+      const response = await fetch(
+        `https://api.telegram.org/bot${BOT_TOKEN}/getUserProfilePhotos?user_id=${user}&limit=1`
+      );
+
+      const result = await response.json();
+
+      if (!result.ok || result.result.total_count === 0) {
+        await sendMessage(chatId, "❌ Profil rasmi topilmadi.");
+        return;
+      }
+
+      await sendMessage(
+        chatId,
+        "ℹ️ Telegram profil rasmini olish uchun foydalanuvchining Telegram ID raqami kerak. Username orqali ID aniqlashni keyingi bosqichda ulaymiz."
+      );
+      return;
+    }
+
+    await sendMessage(
+      chatId,
+      "📸 Instagram profil rasmi uchun alohida modul kerak. Keyingi bosqichda ulaymiz."
+    );
+    return;
+  }
+
   if (action === "tg" || action === "ig") {
     await sendMessage(
       chatId,
