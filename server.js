@@ -117,3 +117,22 @@ app.listen(PORT, async () => {
 
   console.log("Webhook:", await r.text());
 });
+
+
+app.post("/webhook", async (req, res) => {
+  res.sendStatus(200);
+
+  const update = req.body;
+
+  if (update.message) {
+    await handleMessage(update.message);
+  }
+});
+
+app.get("/", (req, res) => {
+  res.send("YASHIRIN STORIES BOT ISHLAYAPTI!");
+});
+
+app.listen(PORT, () => {
+  console.log("Bot server ishga tushdi:", PORT);
+});
