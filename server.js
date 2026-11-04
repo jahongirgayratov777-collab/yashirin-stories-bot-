@@ -8,10 +8,10 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const PORT = process.env.PORT || 8080;
 
 async function sendMessage(chatId, text, keyboard = null) {
-  const body = { chat_id: chatId, text, parse_mode: "HTML" };
+  const body = { chat_id: chatId, text };
   if (keyboard) body.reply_markup = keyboard;
 
-  const response = await fetch(
+  const r = await fetch(
     `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
     {
       method: "POST",
@@ -20,7 +20,7 @@ async function sendMessage(chatId, text, keyboard = null) {
     }
   );
 
-  console.log("Telegram:", await response.text());
+  console.log("sendMessage:", await r.text());
 }
 
 async function handleMessage(message) {
@@ -28,29 +28,27 @@ async function handleMessage(message) {
   const text = (message.text || "").trim();
 
   if (text === "/start") {
-    await sendMessage(
+    return sendMessage(
       chatId,
       "Assalomu alaykum! 👋\n\n" +
-      "<b>YashirinStoriesBot</b> ga xush kelibsiz!\n\n" +
-      "Taklif va murojaatlar: @lorfime\n\n" +
-      "Storiesini ko'rmoqchi bo'lgan insoningiz username'ini kiriting."
+      "🎬 YashirinStoriesBot ga xush kelibsiz!\n\n" +
+      "Stories ko'rmoqchi bo'lgan username'ni yuboring.\n" +
+      "Masalan: @lorfime"
     );
-    return;
   }
 
   if (/^@?[a-zA-Z0-9_]{5,}$/.test(text)) {
     const username = text.replace(/^@/, "");
 
-    await sendMessage(chatId, `👤 Profil: <b>@${username}</b>\n\nPlatformani tanlang:`, {
+    return sendMessage(chatId, `👤 @${username}\n\nPlatformani tanlang:`, {
       inline_keyboard: [
         [{ text: "✈️ Telegram", callback_data: `tg:${username}` }],
         [{ text: "📸 Instagram", callback_data: `ig:${username}` }]
       ]
     });
-    return;
   }
 
-  await sendMessage(chatId, "Iltimos, username yuboring. Masalan: @username");
+  return sendMessage(chatId, "Username yuboring. Masalan: @lorfime");
 }
 
 async function handleCallback(query) {
@@ -69,51 +67,53 @@ async function handleCallback(query) {
     const platform = parts[0];
     const username = parts[1];
 
-    await sendMessage(chatId, `@${username} uchun bo'limni tanlang:`, {
+    return sendMessage(chatId, `@${username} uchun bo'limni tanlang:`, {
       inline_keyboard: [
         [{ text: "🆕 Yangi Stories", callback_data: `new:${platform}:${username}` }],
         [{ text: "📚 Eski Stories", callback_data: `old:${platform}:${username}` }],
         [{ text: "🖼 Profil rasmi", callback_data: `photo:${platform}:${username}` }]
       ]
     });
-    return;
   }
 
   const [action, platform, username] = parts;
 
   const messages = {
-    new: "🆕 Yangi Stories olish funksiyasi hozircha ulanmagan.",
-    old: "📚 Eski Stories olish funksiyasi hozircha ulanmagan.",
-    photo: "🖼 Profil rasmi olish funksiyasi hozircha ulanmagan."
+    new: "🆕 Yangi Stories funksiyasi hozircha ulanmagan.",
+    old: "📚 Eski Stories funksiyasi hozircha ulanmagan.",
+    photo: "🖼 Profil rasmi funksiyasi hozircha ulanmagan."
   };
 
-  await sendMessage(
+  return sendMessage(
     chatId,
-    `${messages[action] || "So'rov bajarildi"}\n\n` +
-    `Platforma: ${platform === "tg" ? "Telegram" : "Instagram"}\n` +
-    `Username: @${username}`
+    `${messages[action] || "So'rov bajarildi"}\nPlatforma: ${platform}\nUsername: @${username}`
   );
 }
 
-app.post("/webhook", (req, res) => {
+app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 
-  const update = req.body;
-
-  if (update.message) handleMessage(update.message).catch(console.error);
-  if (update.callback_query) handleCallback(update.callback_query).catch(console.error);
+  try {
+    if (req.body.message) await handleMessage(req.body.message);
+    if (req.body.callback_query) await handleCallback(req.body.callback_query);
+  } catch (e) {
+    console.error("WEBHOOK ERROR:", e);
+  }
 });
 
 app.get("/", (req, res) => {
   res.send("YASHIRIN STORIES BOT ISHLAYAPTI! ✅");
 });
 
-app.listen(PORT, () => console.log(`Server ${PORT} da ishlayapti`));
+app.listen(PORT, async () => {
+  console.log(`Server ${PORT} da ishlayapti`);
 
-const webhookUrl =
-  "https://yashirin-stories-bot-production-b4a1.up.railway.app/webhook";
+  const url =
+    "https://yashirin-stories-bot-production-b4a1.up.railway.app/webhook";
 
-fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${webhookUrl}`)
-  .then(res => res.json())
-  .then(data => console.log("Webhook sozlandi:", data))
-  .catch(err => console.error("Webhook xatosi:", err));
+  const r = await fetch(
+    `https://api.telegram.org/bot${BOT_TOKEN}/setWebhook?url=${url}`
+  );
+
+  console.log("Webhook:", await r.text());
+});
