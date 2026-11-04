@@ -1,46 +1,14 @@
 
 import express from "express";
-import { TelegramClient } from "telegram";
-import { StringSession } from "telegram/sessions";
 
 const app = express();
 app.use(express.json());
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const API_ID = Number(process.env.API_ID);
-const API_HASH = process.env.API_HASH;
-
 const PORT = process.env.PORT || 8080;
 
-app.get("/", (req, res) => {
-  res.send("YASHIRIN STORIES BOT ISHLAYAPTI! ✅");
-});
-
-app.post("/webhook", async (req, res) => {
-  res.sendStatus(200);
-
-  try {
-    const update = req.body;
-
-    if (update.message) {
-      await handleMessage(update.message);
-    }
-
-    if (update.callback_query) {
-      await handleCallback(update.callback_query);
-    }
-  } catch (error) {
-    console.error("Webhook xatosi:", error);
-  }
-});
-
 async function sendMessage(chatId, text, keyboard = null) {
-  const body = {
-    chat_id: chatId,
-    text,
-    parse_mode: "HTML"
-  };
-
+  const body = { chat_id: chatId, text, parse_mode: "HTML" };
   if (keyboard) body.reply_markup = keyboard;
 
   const response = await fetch(
@@ -52,7 +20,7 @@ async function sendMessage(chatId, text, keyboard = null) {
     }
   );
 
-  console.log("Telegram javobi:", await response.text());
+  console.log("Telegram:", await response.text());
 }
 
 async function handleMessage(message) {
@@ -65,24 +33,20 @@ async function handleMessage(message) {
       "Assalomu alaykum! 👋\n\n" +
       "<b>YashirinStoriesBot</b> ga xush kelibsiz!\n\n" +
       "Taklif va murojaatlar: @lorfime\n\n" +
-      "Storiesini ko'rmoqchi bo'lgan insoningizning username'ini kiriting."
+      "Storiesini ko'rmoqchi bo'lgan insoningiz username'ini kiriting."
     );
     return;
   }
 
-  if (text.startsWith("@") || /^[a-zA-Z0-9_]{5,}$/.test(text)) {
-    const username = text.replace("@", "");
+  if (/^@?[a-zA-Z0-9_]{5,}$/.test(text)) {
+    const username = text.replace(/^@/, "");
 
-    await sendMessage(
-      chatId,
-      `👤 Profil: <b>@${username}</b>\n\nPlatformani tanlang:`,
-      {
-        inline_keyboard: [
-          [{ text: "✈️ Telegram", callback_data: `tg:${username}` }],
-          [{ text: "📸 Instagram", callback_data: `ig:${username}` }]
-        ]
-      }
-    );
+    await sendMessage(chatId, `👤 Profil: <b>@${username}</b>\n\nPlatformani tanlang:`, {
+      inline_keyboard: [
+        [{ text: "✈️ Telegram", callback_data: `tg:${username}` }],
+        [{ text: "📸 Instagram", callback_data: `ig:${username}` }]
+      ]
+    });
     return;
   }
 
@@ -91,51 +55,57 @@ async function handleMessage(message) {
 
 async function handleCallback(query) {
   const chatId = query.message.chat.id;
-  const [platform, username] = query.data.split(":");
+  const data = query.data;
 
-  await fetch(
-    `https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ callback_query_id: query.id })
-    }
-  );
+  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: query.id })
+  });
 
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: "🆕 Yangi Stories", callback_data: `new:${platform}:${username}` }],
-      [{ text: "📚 Eski Stories", callback_data: `old:${platform}:${username}` }],
-      [{ text: "🖼 Profil rasmi", callback_data: `photo:${platform}:${username}` }]
-    ]
-  };
+  const parts = data.split(":");
 
-  if (platform === "tg" || platform === "ig") {
-    await sendMessage(
-      chatId,
-      `@${username} uchun bo'limni tanlang:`,
-      keyboard
-    );
+  if (parts[0] === "tg" || parts[0] === "ig") {
+    const platform = parts[0];
+    const username = parts[1];
+
+    await sendMessage(chatId, `@${username} uchun bo'limni tanlang:`, {
+      inline_keyboard: [
+        [{ text: "🆕 Yangi Stories", callback_data: `new:${platform}:${username}` }],
+        [{ text: "📚 Eski Stories", callback_data: `old:${platform}:${username}` }],
+        [{ text: "🖼 Profil rasmi", callback_data: `photo:${platform}:${username}` }]
+      ]
+    });
     return;
   }
 
-  const [action, source, user] = query.data.split(":");
+  const [action, platform, username] = parts;
 
   const messages = {
-    new: "🆕 Yangi Stories olish funksiyasi ulanmoqda.",
-    old: "📚 Eski Stories olish funksiyasi ulanmoqda.",
-    photo: "🖼 Profil rasmini olish funksiyasi ulanmoqda."
+    new: "🆕 Yangi Stories olish funksiyasi hozircha ulanmagan.",
+    old: "📚 Eski Stories olish funksiyasi hozircha ulanmagan.",
+    photo: "🖼 Profil rasmi olish funksiyasi hozircha ulanmagan."
   };
 
   await sendMessage(
     chatId,
-    `${messages[action] || "So'rov bajarilmoqda..."}\n\n` +
-    `Platforma: ${source === "tg" ? "Telegram" : "Instagram"}\n` +
-    `Username: @${user}\n\n` +
-    "Keyingi bosqichda media olish modulini ulaymiz."
+    `${messages[action] || "So'rov bajarildi"}\n\n` +
+    `Platforma: ${platform === "tg" ? "Telegram" : "Instagram"}\n` +
+    `Username: @${username}`
   );
 }
 
-app.listen(PORT, () => {
-  console.log(`Bot server ${PORT}-portda ishga tushdi.`);
+app.post("/webhook", (req, res) => {
+  res.sendStatus(200);
+
+  const update = req.body;
+
+  if (update.message) handleMessage(update.message).catch(console.error);
+  if (update.callback_query) handleCallback(update.callback_query).catch(console.error);
 });
+
+app.get("/", (req, res) => {
+  res.send("YASHIRIN STORIES BOT ISHLAYAPTI! ✅");
+});
+
+app.listen(PORT, () => console.log(`Server ${PORT} da ishlayapti`));
