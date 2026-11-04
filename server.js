@@ -1,6 +1,6 @@
 
 import express from "express";
-import { TelegramClient } from "telegram";
+import { TelegramClient, Api } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 
 const app = express();
@@ -19,7 +19,6 @@ const tgClient = new TelegramClient(
   { connectionRetries: 5 }
 );
 
-// Telegram orqali xabar yuborish
 async function sendMessage(chatId, text, keyboard = null) {
   const body = {
     chat_id: chatId,
@@ -31,7 +30,7 @@ async function sendMessage(chatId, text, keyboard = null) {
     body.reply_markup = { inline_keyboard: keyboard };
   }
 
-  const response = await fetch(
+  return fetch(
     `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
     {
       method: "POST",
@@ -39,36 +38,36 @@ async function sendMessage(chatId, text, keyboard = null) {
       body: JSON.stringify(body)
     }
   );
-
-  return response.json();
 }
 
-// Rasm yuborish
-async function sendPhoto(chatId, photoBuffer, caption = "") {
+async function sendMedia(chatId, buffer, caption, isVideo = false) {
   const form = new FormData();
-
   form.append("chat_id", String(chatId));
   form.append("caption", caption);
+
   form.append(
-    "photo",
-    new Blob([photoBuffer], { type: "image/jpeg" }),
-    "profile.jpg"
+    isVideo ? "video" : "photo",
+    new Blob([buffer]),
+    isVideo ? "story.mp4" : "story.jpg"
   );
 
-  const response = await fetch(
-    `https://api.telegram.org/bot${BOT_TOKEN}/sendPhoto`,
+  return fetch(
+    `https://api.telegram.org/bot${BOT_TOKEN}/send${isVideo ? "Video" : "Photo"}`,
     {
       method: "POST",
       body: form
     }
   );
-
-  return response.json();
 }
 
-// Boshlang‘ich menyu
+async function ensureConnected() {
+  if (!tgClient.connected) {
+    await tgClient.connect();
+  }
+}
+
 async function handleMessage(message) {
-  if (!message || !message.chat) return;
+  if (!message?.chat) return;
 
   const chatId = message.chat.id;
   const text = (message.text || "").trim();
@@ -77,8 +76,7 @@ async function handleMessage(message) {
     await sendMessage(
       chatId,
       "👋 <b>Yashirin Stories Bot</b>\n\n" +
-      "Telegram yoki Instagram username yuboring.\n\n" +
-      "Masalan: <code>@username</code>"
+      "Telegram username yuboring.\nMasalan: <code>@username</code>"
     );
     return;
   }
@@ -86,152 +84,162 @@ async function handleMessage(message) {
   const username = text.replace(/^@/, "");
 
   if (/^[a-zA-Z0-9_]{5,}$/.test(username)) {
-    const keyboard = [
-      [
-        {
-          text: "✈️ Telegram",
-          callback_data: `tg:${username}`
-        },
-        {
-          text: "📸 Instagram",
-          callback_data: `ig:${username}`
-        }
-      ]
-    ];
-
     await sendMessage(
       chatId,
-      `👤 Username: <b>@${username}</b>\n\nQaysi platformani tanlaysiz?`,
-      keyboard
+      `👤 <b>@${username}</b>\nPlatformani tanlang:`,
+      [[
+        { text: "✈️ Telegram", callback_data: `tg:${username}` }
+      ]]
     );
     return;
   }
 
-  await sendMessage(
-    chatId,
-    "❌ Username noto‘g‘ri.\n\nIltimos, username yuboring.\nMasalan: <code>@username</code>"
-  );
+  await sendMessage(chatId, "❌ Username noto‘g‘ri. Qaytadan yuboring.");
 }
 
-// Tugmalarni qayta ishlash
-async function handleCallback(query) {
-  if (!query || !query.message) return;
+async function getTelegramUser(username) {
+  await ensureConnected();
+  return tgClient.getEntity(username);
+}
 
-  const chatId = query.message.chat.id;
-  const data = query.data || "";
-  const parts = data.split(":");
-  const action = parts[0];
+async function handleProfilePhotos(chatId, username) {
+  try {
+    const user = await getTelegramUser(username);
 
-  // Platforma tanlash
-  if (action === "tg" || action === "ig") {
-    const platform = action;
-    const username = parts[1];
-
-    const keyboard = [
-      [
-        {
-          text: "🆕 Yangi Stories",
-          callback_data: `new:${platform}:${username}`
-        }
-      ],
-      [
-        {
-          text: "📂 Eski Stories",
-          callback_data: `old:${platform}:${username}`
-        }
-      ],
-      [
-        {
-          text: "🖼 Profil rasmi",
-          callback_data: `photo:${platform}:${username}`
-        }
-      ]
-    ];
-
-    await sendMessage(
-      chatId,
-      `@${username} uchun kerakli xizmatni tanlang:`,
-      keyboard
+    const photos = await tgClient.invoke(
+      new Api.photos.GetUserPhotos({
+        userId: user,
+        offset: 0,
+        maxId: 0,
+        limit: 100
+      })
     );
-    return;
-  }
 
-  // Profil rasmi
-  if (action === "photo") {
-    const platform = parts[1];
-    const username = parts[2];
-
-    if (platform === "tg") {
-      try {
-        if (!tgClient.connected) {
-          await tgClient.connect();
-        }
-
-        const user = await tgClient.getEntity(username);
-        const photo = await tgClient.downloadProfilePhoto(user);
-
-        if (!photo) {
-          await sendMessage(
-            chatId,
-            "❌ Bu foydalanuvchida profil rasmi topilmadi."
-          );
-          return;
-        }
-
-        await sendPhoto(
-          chatId,
-          photo,
-          `🖼 Telegram profil rasmi: @${username}`
-        );
-      } catch (error) {
-        console.error("Profil rasmi xatosi:", error);
-
-        await sendMessage(
-          chatId,
-          "❌ Profil rasmini olishda xatolik.\n" +
-          "Username mavjudligini tekshiring."
-        );
-      }
-
+    if (!photos.photos?.length) {
+      await sendMessage(chatId, "Profil rasmlari topilmadi.");
       return;
     }
 
-    if (platform === "ig") {
+    await sendMessage(
+      chatId,
+      `🖼 @${username} profil rasmlari: ${photos.photos.length} ta`
+    );
+
+    for (const photo of photos.photos) {
+      try {
+        const buffer = await tgClient.downloadMedia(photo, {});
+        if (buffer) {
+          await sendMedia(chatId, buffer, `🖼 @${username}`);
+        }
+      } catch (err) {
+        console.error("Photo yuklash xatosi:", err.message);
+      }
+    }
+  } catch (error) {
+    console.error("Profil rasmlari:", error);
+    await sendMessage(chatId, "❌ Profil rasmlarini olishda xatolik.");
+  }
+}
+
+async function handleNewStories(chatId, username) {
+  try {
+    const user = await getTelegramUser(username);
+
+    const result = await tgClient.invoke(
+      new Api.stories.GetPeerStories({
+        peer: user
+      })
+    );
+
+    const stories = result.stories?.stories || [];
+
+    if (!stories.length) {
       await sendMessage(
         chatId,
-        "📸 Instagram profil rasmini olish funksiyasi hozircha sozlanmoqda."
+        `📭 @${username} da hozir faol Stories topilmadi.`
       );
       return;
     }
-  }
-
-  // Yangi Stories
-  if (action === "new") {
-    const platform = parts[1];
-    const username = parts[2];
 
     await sendMessage(
       chatId,
-      `🔍 @${username} uchun yangi ${platform === "tg" ? "Telegram" : "Instagram"} Stories qidirilmoqda...\n\n` +
-      "Bu funksiya uchun Stories olish moduli alohida ulanishi kerak."
+      `🆕 @${username} — ${stories.length} ta Stories topildi.`
     );
-    return;
-  }
 
-  // Eski Stories
-  if (action === "old") {
-    const platform = parts[1];
-    const username = parts[2];
+    for (const story of stories) {
+      try {
+        if (story.media?.photo || story.media?.document) {
+          const buffer = await tgClient.downloadMedia(story.media, {});
 
+          if (!buffer) continue;
+
+          const isVideo =
+            story.media.document?.mimeType?.startsWith("video/") ||
+            story.media.document?.attributes?.some(
+              attr => attr.className === "DocumentAttributeVideo"
+            );
+
+          await sendMedia(
+            chatId,
+            buffer,
+            `📖 @${username} | Story ID: ${story.id}`,
+            Boolean(isVideo)
+          );
+        }
+      } catch (err) {
+        console.error("Story media xatosi:", err.message);
+      }
+    }
+  } catch (error) {
+    console.error("Stories olish xatosi:", error);
     await sendMessage(
       chatId,
-      `📂 @${username} uchun eski ${platform === "tg" ? "Telegram" : "Instagram"} Stories.\n\n` +
-      "Arxiv Stories funksiyasi hozircha ishlab chiqilmoqda."
+      "❌ Stories olish amalga oshmadi.\n" +
+      "Profil ochiqligini va akkaunt ruxsatini tekshiring."
     );
   }
 }
 
-// Webhook
+async function handleCallback(query) {
+  if (!query?.message) return;
+
+  const chatId = query.message.chat.id;
+  const parts = (query.data || "").split(":");
+  const action = parts[0];
+
+  if (action === "tg") {
+    const username = parts[1];
+
+    await sendMessage(
+      chatId,
+      `@${username} uchun xizmatni tanlang:`,
+      [
+        [{ text: "🆕 Yangi Stories", callback_data: `new:${username}` }],
+        [{ text: "🖼 Barcha profil rasmlari", callback_data: `photos:${username}` }],
+        [{ text: "📂 Eski Stories", callback_data: `old:${username}` }]
+      ]
+    );
+    return;
+  }
+
+  if (action === "photos") {
+    await handleProfilePhotos(chatId, parts[1]);
+    return;
+  }
+
+  if (action === "new") {
+    await handleNewStories(chatId, parts[1]);
+    return;
+  }
+
+  if (action === "old") {
+    await sendMessage(
+      chatId,
+      "📂 Eski Stories arxivi faqat akkaunt egasining mavjud arxivi va Telegram ruxsat bergan ma'lumotlar doirasida olinadi. Bu funksiya keyingi bosqichda ulanadi."
+    );
+  }
+}
+
 app.post("/webhook", async (req, res) => {
   res.sendStatus(200);
 
@@ -261,12 +269,10 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// Server tekshiruvi
 app.get("/", (req, res) => {
   res.send("Yashirin Stories Bot ishlayapti! 🤖");
 });
 
-// Serverni ishga tushirish
 app.listen(PORT, "0.0.0.0", async () => {
   console.log(`Server ${PORT} portda ishga tushdi`);
 
@@ -275,9 +281,7 @@ app.listen(PORT, "0.0.0.0", async () => {
       await tgClient.connect();
       console.log("Telegram MTProto akkaunti ulandi!");
     } catch (error) {
-      console.error("MTProto ulanish xatosi:", error.message);
+      console.error("MTProto xatosi:", error.message);
     }
-  } else {
-    console.log("MTProto sozlamalari topilmadi. Bot API rejimida ishlaydi.");
   }
 });
