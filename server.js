@@ -12,6 +12,13 @@ const API_HASH = process.env.API_HASH;
 const STRING_SESSION = process.env.STRING_SESSION || "";
 const PORT = process.env.PORT || 8080;
 
+// FAQAT SIZNING ADMIN ID
+const ADMIN_ID = 7663086750;
+
+// Statistika (server qayta ishga tushganda tozalanadi)
+const users = new Map();
+const logs = [];
+
 const tgClient = new TelegramClient(
   new StringSession(STRING_SESSION),
   API_ID,
@@ -44,6 +51,185 @@ async function sendMessage(chatId, text, keyboard = null) {
   );
 
   return r.json();
+}
+
+// ========================
+// ADMIN TEKSHIRISH
+// ========================
+
+function isAdmin(chatId) {
+  return Number(chatId) === ADMIN_ID;
+}
+
+// ========================
+// FOYDALANUVCHINI SAQLASH
+// ========================
+
+function saveUser(message) {
+  const id = message.from?.id;
+  if (!id) return;
+
+  users.set(id, {
+    id,
+    firstName: message.from.first_name || "",
+    lastName: message.from.last_name || "",
+    username: message.from.username || "username yo‘q",
+    lastSeen: new Date().toLocaleString("uz-UZ", {
+      timeZone: "Asia/Tashkent"
+    })
+  });
+}
+
+// ========================
+// HARAKATLARNI YOZISH
+// ========================
+
+function logActivity(user, action, target) {
+  logs.unshift({
+    userId: user.id,
+    userName: user.username || "username yo‘q",
+    firstName: user.first_name || "",
+    action,
+    target,
+    time: new Date().toLocaleString("uz-UZ", {
+      timeZone: "Asia/Tashkent"
+    })
+  });
+
+  // Oxirgi 1000 ta harakatni saqlaymiz
+  if (logs.length > 1000) logs.length = 1000;
+}
+
+// ========================
+// ADMIN PANEL
+// ========================
+
+async function showAdmin(chatId) {
+  if (!isAdmin(chatId)) {
+    await sendMessage(chatId, "⛔ Sizda admin huquqi yo‘q.");
+    return;
+  }
+
+  const today = new Date().toLocaleDateString("uz-UZ", {
+    timeZone: "Asia/Tashkent"
+  });
+
+  const todayLogs = logs.filter(
+    x => x.time.startsWith(today)
+  );
+
+  await sendMessage(
+    chatId,
+    "🔐 <b>YASHIRIN STORIES — ADMIN PANEL</b>\n\n" +
+    `👥 Jami foydalanuvchilar: <b>${users.size}</b>\n` +
+    `📥 Jami harakatlar: <b>${logs.length}</b>\n` +
+    `📅 Bugungi harakatlar: <b>${todayLogs.length}</b>\n\n` +
+    "Quyidagi bo‘limni tanlang:",
+    [
+      [
+        { text: "👥 Foydalanuvchilar", callback_data: "admin_users" }
+      ],
+      [
+        { text: "📥 Yuklab olishlar tarixi", callback_data: "admin_logs" }
+      ],
+      [
+        { text: "📊 Statistika", callback_data: "admin_stats" }
+      ]
+    ]
+  );
+}
+
+// ========================
+// FOYDALANUVCHILAR RO‘YXATI
+// ========================
+
+async function showUsers(chatId) {
+  if (!isAdmin(chatId)) return;
+
+  const list = [...users.values()];
+
+  if (!list.length) {
+    await sendMessage(chatId, "Hozircha foydalanuvchilar yo‘q.");
+    return;
+  }
+
+  await sendMessage(
+    chatId,
+    `👥 <b>FOYDALANUVCHILAR (${list.length})</b>`
+  );
+
+  for (let i = 0; i < list.length; i += 20) {
+    const chunk = list.slice(i, i + 20);
+
+    const text = chunk.map((u, index) =>
+      `${i + index + 1}. ${u.firstName} ${u.lastName}\n` +
+      `👤 @${u.username}\n` +
+      `🆔 <code>${u.id}</code>\n` +
+      `🕒 ${u.lastSeen}`
+    ).join("\n\n");
+
+    await sendMessage(chatId, text);
+  }
+}
+
+// ========================
+// YUKLAB OLISHLAR TARIXI
+// ========================
+
+async function showLogs(chatId) {
+  if (!isAdmin(chatId)) return;
+
+  if (!logs.length) {
+    await sendMessage(chatId, "📭 Hozircha yuklab olishlar yo‘q.");
+    return;
+  }
+
+  await sendMessage(chatId, "📥 <b>OXIRGI HARAKATLAR</b>");
+
+  const recent = logs.slice(0, 50);
+
+  for (let i = 0; i < recent.length; i += 10) {
+    const chunk = recent.slice(i, i + 10);
+
+    const text = chunk.map((x, index) =>
+      `${i + index + 1}. 👤 ${x.firstName}\n` +
+      `Username: @${x.userName}\n` +
+      `🎯 Amal: ${x.action}\n` +
+      `📱 Nishon: @${x.target}\n` +
+      `🕒 ${x.time}`
+    ).join("\n\n");
+
+    await sendMessage(chatId, text);
+  }
+
+  await sendMessage(
+    chatId,
+    "ℹ️ Oxirgi 50 ta harakat ko‘rsatildi."
+  );
+}
+
+// ========================
+// STATISTIKA
+// ========================
+
+async function showStats(chatId) {
+  if (!isAdmin(chatId)) return;
+
+  const counts = {
+    stories: logs.filter(x => x.action === "Yangi Stories").length,
+    highlights: logs.filter(x => x.action === "Highlights").length,
+    photos: logs.filter(x => x.action === "Profil rasmlari").length
+  };
+
+  await sendMessage(
+    chatId,
+    "📊 <b>BOT STATISTIKASI</b>\n\n" +
+    `👥 Foydalanuvchilar: ${users.size}\n` +
+    `📥 Jami so‘rovlar: ${logs.length}\n\n` +
+    `🆕 Yangi Stories: ${counts.stories}\n` +
+    `📂 Highlights: ${counts.highlights}\n` +
+    `🖼 Profil rasmlari: ${counts.photos}`
+  );
 }
 
 // ========================
@@ -105,6 +291,14 @@ async function handleMessage(message) {
   const chatId = message.chat.id;
   const text = (message.text || "").trim();
 
+  saveUser(message);
+
+  // ADMIN PANEL
+  if (text === "/admin") {
+    await showAdmin(chatId);
+    return;
+  }
+
   if (text === "/start") {
     await sendMessage(
       chatId,
@@ -153,7 +347,9 @@ async function handleMessage(message) {
 // PROFIL RASMLARI
 // ========================
 
-async function handleProfilePhotos(chatId, username) {
+async function handleProfilePhotos(chatId, username, userInfo) {
+  logActivity(userInfo, "Profil rasmlari", username);
+
   try {
     const user = await getUser(username);
 
@@ -181,12 +377,7 @@ async function handleProfilePhotos(chatId, username) {
         const buffer = await tgClient.downloadMedia(photo);
 
         if (buffer) {
-          await sendMedia(
-            chatId,
-            buffer,
-            `🖼 @${username}`,
-            "photo"
-          );
+          await sendMedia(chatId, buffer, `🖼 @${username}`, "photo");
         }
       } catch (e) {
         console.error("PHOTO ERROR:", e.message);
@@ -211,19 +402,13 @@ function detectMediaType(media) {
   if (media?.document) {
     const doc = media.document;
 
-    if (doc.mimeType?.startsWith("video/")) {
-      return "video";
-    }
+    if (doc.mimeType?.startsWith("video/")) return "video";
 
     if (doc.attributes?.some(
       a => a.className === "DocumentAttributeVideo"
-    )) {
-      return "video";
-    }
+    )) return "video";
 
-    if (doc.mimeType?.startsWith("image/")) {
-      return "photo";
-    }
+    if (doc.mimeType?.startsWith("image/")) return "photo";
   }
 
   return null;
@@ -233,14 +418,14 @@ function detectMediaType(media) {
 // STORIES YUKLAB OLISH
 // ========================
 
-async function downloadStories(chatId, username, stories) {
+async function downloadStories(chatId, username, stories, userInfo, action) {
   if (!stories || stories.length === 0) {
-    await sendMessage(
-      chatId,
-      `📭 @${username} uchun Stories topilmadi.`
-    );
+    await sendMessage(chatId, `📭 @${username} uchun Stories topilmadi.`);
     return;
   }
+
+  // Admin statistikasiga qayd etish
+  logActivity(userInfo, action, username);
 
   await sendMessage(
     chatId,
@@ -256,33 +441,21 @@ async function downloadStories(chatId, username, stories) {
       const media = story.media;
       const type = detectMediaType(media);
 
-      if (!type) {
-        console.log("Noma'lum media turi:", story.id);
-        continue;
-      }
+      if (!type) continue;
 
       const buffer = await tgClient.downloadMedia(media);
-
       if (!buffer) continue;
 
       const caption =
         `📖 @${username}\n` +
         `Story ID: ${story.id}`;
 
-      const result = await sendMedia(
-        chatId,
-        buffer,
-        caption,
-        type
-      );
+      const result = await sendMedia(chatId, buffer, caption, type);
 
       if (result.ok) count++;
 
     } catch (error) {
-      console.error(
-        `STORY ${story.id} ERROR:`,
-        error.message
-      );
+      console.error(`STORY ${story.id} ERROR:`, error.message);
     }
   }
 
@@ -296,19 +469,23 @@ async function downloadStories(chatId, username, stories) {
 // YANGI STORIES
 // ========================
 
-async function handleNewStories(chatId, username) {
+async function handleNewStories(chatId, username, userInfo) {
   try {
     const peer = await getUser(username);
 
     const result = await tgClient.invoke(
-      new Api.stories.GetPeerStories({
-        peer
-      })
+      new Api.stories.GetPeerStories({ peer })
     );
 
     const stories = result.stories?.stories || [];
 
-    await downloadStories(chatId, username, stories);
+    await downloadStories(
+      chatId,
+      username,
+      stories,
+      userInfo,
+      "Yangi Stories"
+    );
 
   } catch (error) {
     console.error("NEW STORIES ERROR:", error);
@@ -325,7 +502,7 @@ async function handleNewStories(chatId, username) {
 // DOIMIY STORIES / HIGHLIGHTS
 // ========================
 
-async function handleHighlights(chatId, username) {
+async function handleHighlights(chatId, username, userInfo) {
   try {
     const peer = await getUser(username);
 
@@ -339,7 +516,13 @@ async function handleHighlights(chatId, username) {
 
     const stories = result.stories || [];
 
-    await downloadStories(chatId, username, stories);
+    await downloadStories(
+      chatId,
+      username,
+      stories,
+      userInfo,
+      "Highlights"
+    );
 
   } catch (error) {
     console.error("HIGHLIGHTS ERROR:", error);
@@ -365,28 +548,44 @@ async function handleCallback(query) {
   const action = parts[0];
   const username = parts[1];
 
+  // ADMIN TUGMALARI
+  if (action.startsWith("admin_")) {
+    if (!isAdmin(chatId)) {
+      await sendMessage(chatId, "⛔ Admin huquqi yo‘q.");
+      return;
+    }
+
+    if (action === "admin_users") {
+      await showUsers(chatId);
+      return;
+    }
+
+    if (action === "admin_logs") {
+      await showLogs(chatId);
+      return;
+    }
+
+    if (action === "admin_stats") {
+      await showStats(chatId);
+      return;
+    }
+  }
+
+  const userInfo = query.from;
+
   if (action === "tg") {
     await sendMessage(
       chatId,
       `👤 <b>@${username}</b>\n\nKerakli xizmatni tanlang:`,
       [
         [
-          {
-            text: "🆕 Yangi Stories",
-            callback_data: `new:${username}`
-          }
+          { text: "🆕 Yangi Stories", callback_data: `new:${username}` }
         ],
         [
-          {
-            text: "📂 Doimiy Stories (Highlights)",
-            callback_data: `highlights:${username}`
-          }
+          { text: "📂 Doimiy Stories (Highlights)", callback_data: `highlights:${username}` }
         ],
         [
-          {
-            text: "🖼 Barcha profil rasmlari",
-            callback_data: `photos:${username}`
-          }
+          { text: "🖼 Barcha profil rasmlari", callback_data: `photos:${username}` }
         ]
       ]
     );
@@ -395,17 +594,17 @@ async function handleCallback(query) {
   }
 
   if (action === "new") {
-    await handleNewStories(chatId, username);
+    await handleNewStories(chatId, username, userInfo);
     return;
   }
 
   if (action === "highlights") {
-    await handleHighlights(chatId, username);
+    await handleHighlights(chatId, username, userInfo);
     return;
   }
 
   if (action === "photos") {
-    await handleProfilePhotos(chatId, username);
+    await handleProfilePhotos(chatId, username, userInfo);
     return;
   }
 }
@@ -431,9 +630,7 @@ app.post("/webhook", async (req, res) => {
         `https://api.telegram.org/bot${BOT_TOKEN}/answerCallbackQuery`,
         {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json"
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             callback_query_id: update.callback_query.id
           })
